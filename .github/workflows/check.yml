@@ -1,15 +1,26 @@
 name: check-termin
 on:
   schedule:
-    - cron: "*/5 * * * *"  # GitHub's minimum; actual runs are often 5-15 min apart
+    - cron: "*/30 * * * *"  # backup only; GitHub actually fires this every few hours
   workflow_dispatch:
+concurrency:
+  group: watcher  # one loop at a time; a new trigger waits for the running one
+permissions:
+  actions: write  # lets the run start its successor
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 350
     steps:
       - uses: actions/checkout@v4
       - run: python3 check.py
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
           DEADLINE: "2026-11-10"
+          LOOP_MINUTES: "330"  # stay under GitHub's 6h job limit
+          INTERVAL: "120"
+      - name: Start next loop
+        if: always()
+        run: gh workflow run check.yml -R ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}

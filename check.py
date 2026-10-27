@@ -5,6 +5,7 @@ import html
 import os
 import re
 import sys
+import time
 import urllib.request
 
 BOOK_URL = (
@@ -49,23 +50,41 @@ def notify(title, msg):
     urllib.request.urlopen(req, timeout=30)
 
 
-def main():
-    if "--test-alert" in sys.argv:
-        notify("Termin watcher test", "Alerts work. Tap to open the booking page.")
-        return
+def check_once(last_hits):
+    """Print current slots; alert if hits changed since last_hits. Returns current hits."""
     slots = parse(fetch())
     if not slots:
         print("No slots parsed - page layout may have changed")
         sys.exit(1)  # makes the GitHub run red so a broken parser is visible
+    print(dt.datetime.now().strftime("--- %H:%M:%S"))
     for d, t, loc in slots:
         print(f"{d:%a %d.%m.%Y} {t}  {loc}")
     hits = [s for s in slots if s[0] <= DEADLINE]
-    if hits:
+    if hits and hits != last_hits:  # don't re-alert every 2 min for the same slot
         body = "\n".join(f"{d:%a %d.%m.} {t} – {loc}" for d, t, loc in hits) + "\nTap to book."
         print("HIT!\n" + body)
         notify(f"Ummeldung Termin by {DEADLINE:%d.%m.} available!", body)
-    else:
+    elif not hits:
         print(f"Nothing on or before {DEADLINE}.")
+    return hits
+
+
+def main():
+    if "--test-alert" in sys.argv:
+        notify("Termin watcher test", "Alerts work. Tap to open the booking page.")
+        return
+    # LOOP_MINUTES > 0: keep checking every INTERVAL seconds (GitHub's own cron fires only every few hours)
+    end = time.time() + 60 * int(os.environ.get("LOOP_MINUTES", "0"))
+    interval = int(os.environ.get("INTERVAL", "120"))
+    hits = None
+    while True:
+        try:
+            hits = check_once(hits)
+        except (OSError, ValueError) as e:  # network hiccup: retry next round
+            print(f"fetch failed: {e}")
+        if time.time() + interval > end:
+            break
+        time.sleep(interval)
 
 
 if __name__ == "__main__":
